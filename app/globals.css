@@ -1,0 +1,60 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  background: #0a0e14;
+  color: #e7eefc;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  background-image:
+    radial-gradient(circle at 20% -10%, rgba(124, 92, 255, 0.12), transparent 40%),
+    radial-gradient(circle at 90% 0%, rgba(52, 225, 196, 0.1), transparent 35%);
+  min-height: 100dvh;
+}
+
+@layer components {
+  .mk-panel {
+    @apply rounded-2xl border border-makina-line bg-makina-panel/80 backdrop-blur;
+  }
+  .mk-btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3 text-base font-semibold
+      transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  .mk-btn-primary {
+    @apply mk-btn bg-makina-accent text-makina-bg hover:brightness-110;
+  }
+  .mk-btn-secondary {
+    @apply mk-btn border border-makina-line bg-makina-panel2 text-makina-text hover:border-makina-accent/60;
+  }
+  .mk-btn-danger {
+    @apply mk-btn border border-makina-danger/40 bg-makina-danger/10 text-makina-danger hover:bg-makina-danger/20;
+  }
+  .mk-input {
+    @apply w-full rounded-xl border border-makina-line bg-makina-bg/60 px-4 py-3 text-base
+      text-makina-text placeholder:text-makina-muted focus:border-makina-accent focus:outline-none;
+  }
+  .mk-label {
+    @apply mb-1 block text-xs font-semibold uppercase tracking-wider text-makina-muted;
+  }
+  .mk-chip {
+    @apply inline-flex items-center rounded-full border border-makina-line bg-makina-panel2 px-3 py-1 text-xs font-medium;
+  }
+}
+
+/* Subtle scrollbar for the board / log */
+.mk-scroll::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+.mk-scroll::-webkit-scrollbar-thumb {
+  background: #273445;
+  border-radius: 999px;
+}
