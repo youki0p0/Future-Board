@@ -2,6 +2,7 @@ import type {
   BoardLength,
   EffectType,
   GameEventType,
+  JoinResult,
   PendingState,
   Player,
   Room,
@@ -24,7 +25,8 @@ const sb = () => requireSupabase();
 // Low-level helpers
 // ----------------------------------------------------------------------------
 
-function newCode(len = 4): string {
+// 4-char uppercase code, ambiguous chars excluded — matches the shared spec.
+export function generateRoomCode(len = 4): string {
   let out = "";
   for (let i = 0; i < len; i++) out += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)];
   return out;
@@ -107,15 +109,21 @@ export async function loadRoomData(code: string): Promise<RoomData | null> {
   };
 }
 
-/** Subscribe to all room-scoped tables. Calls onChange on any mutation. */
+/**
+ * Subscribe to all room-scoped tables. Calls onChange on any mutation.
+ * Mirrors the shared spec: a low-latency broadcast "sync" channel plus
+ * postgres_changes on rooms/players/squares and INSERTs on the append-only
+ * game_events log. A polling fallback in useRoomState covers missed events.
+ */
 export function subscribeRoom(roomId: string, onChange: () => void) {
   const client = sb();
   const channel = client
-    .channel(`room:${roomId}`)
+    .channel(`room:${roomId}`, { config: { broadcast: { self: false } } })
+    .on("broadcast", { event: "sync" }, () => onChange())
     .on("postgres_changes", { event: "*", schema: "public", table: "rooms", filter: `id=eq.${roomId}` }, onChange)
     .on("postgres_changes", { event: "*", schema: "public", table: "players", filter: `room_id=eq.${roomId}` }, onChange)
     .on("postgres_changes", { event: "*", schema: "public", table: "squares", filter: `room_id=eq.${roomId}` }, onChange)
-    .on("postgres_changes", { event: "*", schema: "public", table: "game_events", filter: `room_id=eq.${roomId}` }, onChange)
+    .on("postgres_changes", { event: "INSERT", schema: "public", table: "game_events", filter: `room_id=eq.${roomId}` }, onChange)
     .subscribe();
   return channel;
 }
@@ -129,24 +137,26 @@ export async function createRoom(
   name: string,
   boardLength: BoardLength,
 ): Promise<{ code: string }> {
-  let code = newCode();
+  let code = generateRoomCode();
   // Retry on the rare code collision.
   for (let attempt = 0; attempt < 5; attempt++) {
     const { data: existing } = await sb().from("rooms").select("id").eq("code", code).maybeSingle();
     if (!existing) break;
-    code = newCode();
+    code = generateRoomCode();
   }
 
   const { data: roomRow, error } = await sb()
     .from("rooms")
     .insert({
       code,
-      status: "lobby",
+      status: "waiting",
       host_client_id: clientId,
       board_length: boardLength,
       setup_squares_per_player: squaresPerPlayer(boardLength),
       turn_index: 0,
       last_spurt_enabled: false,
+      seed: String(Math.floor(Math.random() * 2 ** 31)),
+      version: 0,
       state: {},
     })
     .select()
@@ -154,52 +164,77 @@ export async function createRoom(
   if (error || !roomRow) throw new Error(error?.message ?? "ルーム作成に失敗しました");
 
   const room = roomRow as Room;
+  // Host is auto-ready on creation (shared spec).
   await sb().from("players").insert({
     room_id: room.id,
     client_id: clientId,
     name: name || "ホスト",
     position: 0,
-    is_ready: false,
+    is_ready: true,
     skip_next_turn: false,
+    is_cpu: false,
     score: 0,
   });
 
   return { code };
 }
 
-export async function joinRoom(
-  clientId: string,
-  code: string,
-  name: string,
-): Promise<{ ok: boolean; error?: string }> {
+export async function joinRoom(clientId: string, code: string, name: string): Promise<JoinResult> {
   const { data: roomRow } = await sb()
     .from("rooms")
     .select("*")
     .eq("code", code.toUpperCase())
     .maybeSingle();
-  if (!roomRow) return { ok: false, error: "ルームが見つかりません" };
+  if (!roomRow) return { ok: false, error: "not_found" };
   const room = roomRow as Room;
 
   const players = await fetchPlayers(room.id);
   const mine = players.find((p) => p.client_id === clientId);
-  if (mine) return { ok: true }; // already joined → allow re-entry
+  if (mine) {
+    // Reconnecting to a seat we already hold → refresh the display name.
+    await patchPlayer(mine.id, { name: name || mine.name });
+    return { ok: true, roomId: room.id, playerId: mine.id };
+  }
 
-  if (room.status !== "lobby") return { ok: false, error: "このゲームは既に開始しています" };
-  if (players.length >= MAX_PLAYERS) return { ok: false, error: "満員です (最大8人)" };
+  if (room.status !== "waiting") return { ok: false, error: "in_progress", roomId: room.id };
+  if (players.length >= MAX_PLAYERS) return { ok: false, error: "full", roomId: room.id };
 
-  const { error } = await sb().from("players").insert({
-    room_id: room.id,
-    client_id: clientId,
-    name: name || `Player ${players.length + 1}`,
-    position: 0,
-    is_ready: false,
-    skip_next_turn: false,
-    score: 0,
-  });
-  if (error) return { ok: false, error: error.message };
+  const { data: inserted, error } = await sb()
+    .from("players")
+    .insert({
+      room_id: room.id,
+      client_id: clientId,
+      name: name || `Player ${players.length + 1}`,
+      position: 0,
+      is_ready: false,
+      skip_next_turn: false,
+      is_cpu: false,
+      score: 0,
+    })
+    .select("id")
+    .single();
+  if (error || !inserted) return { ok: false, error: "join_failed", roomId: room.id };
 
   await logEvent(room.id, null, "join", { name });
-  return { ok: true };
+  return { ok: true, roomId: room.id, playerId: (inserted as { id: string }).id };
+}
+
+// Test-only: insert a CPU player (already "ready"). Remove with the CPU feature.
+export async function requireSupabaseInsertCpu(
+  roomId: string,
+  clientId: string,
+  name: string,
+): Promise<void> {
+  await sb().from("players").insert({
+    room_id: roomId,
+    client_id: clientId,
+    name,
+    position: 0,
+    is_ready: true,
+    skip_next_turn: false,
+    is_cpu: true,
+    score: 0,
+  });
 }
 
 export async function renamePlayer(playerId: string, name: string): Promise<void> {
@@ -235,15 +270,22 @@ export async function startGame(roomId: string): Promise<void> {
 }
 
 export async function resetGame(roomId: string): Promise<void> {
+  const room = await fetchRoom(roomId);
   const players = await fetchPlayers(roomId);
+  // On rematch the host (and CPUs) stay ready; everyone else resets (shared spec).
   await Promise.all(
     players.map((p) =>
-      patchPlayer(p.id, { position: 0, is_ready: false, skip_next_turn: false, score: 0 }),
+      patchPlayer(p.id, {
+        position: 0,
+        is_ready: p.is_cpu || p.client_id === room.host_client_id,
+        skip_next_turn: false,
+        score: 0,
+      }),
     ),
   );
   await sb().from("squares").delete().eq("room_id", roomId);
   await patchRoom(roomId, {
-    status: "lobby",
+    status: "waiting",
     current_turn_player_id: null,
     turn_index: 0,
     last_spurt_enabled: false,

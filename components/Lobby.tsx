@@ -5,6 +5,7 @@ import type { Player, Room } from "@/types/game";
 import { BOARD_OPTIONS } from "@/lib/board";
 import { renamePlayer, setBoardLength, setReady, startSetup } from "@/lib/room";
 import { saveName } from "@/lib/clientId";
+import { addCpuPlayer, CPU_TEST_MODE, cpuCount } from "@/lib/cpu";
 import PlayerList from "@/components/PlayerList";
 
 export default function Lobby({
@@ -74,6 +75,16 @@ export default function Lobby({
           プレイヤー ({players.length}/8)
         </h2>
         <PlayerList players={players} meId={me?.id} boardLength={room.board_length} />
+
+        {CPU_TEST_MODE && isHost && (
+          <button
+            className="mk-btn-secondary mt-3 w-full border-dashed text-sm"
+            disabled={players.length >= 8}
+            onClick={() => addCpuPlayer(room.id, cpuCount(players) + 1)}
+          >
+            🤖 CPUを追加（テスト用・リリース時に削除）
+          </button>
+        )}
       </section>
 
       <section className="mk-panel mb-4 p-5">

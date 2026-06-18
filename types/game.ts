@@ -1,6 +1,8 @@
 // Core domain types for Future Board by Project MAKINA.
 
-export type RoomStatus = "lobby" | "setup" | "playing" | "finished";
+// Aligned with the shared room-matching spec (see StellarBurst):
+// 'waiting' is the joinable pre-game state. 'setup' is Future Board specific.
+export type RoomStatus = "waiting" | "setup" | "playing" | "finished";
 export type Visibility = "hidden" | "public";
 export type CreatedPhase = "setup" | "last_spurt";
 
@@ -47,6 +49,8 @@ export interface Room {
   turn_index: number;
   last_spurt_enabled: boolean;
   winner_player_id: string | null;
+  seed: string;
+  version: number;
   state: RoomState;
   created_at: string;
   updated_at: string;
@@ -60,6 +64,7 @@ export interface Player {
   position: number;
   is_ready: boolean;
   skip_next_turn: boolean;
+  is_cpu: boolean;
   score: number;
   joined_at: string;
   updated_at: string;
@@ -119,3 +124,16 @@ export interface RoomData {
   squares: Square[];
   events: GameEvent[];
 }
+
+// Structured join result (machine error codes), aligned with the shared
+// room-matching spec. The UI maps each code to a localized message.
+export type JoinError =
+  | "not_configured"
+  | "not_found"
+  | "in_progress"
+  | "full"
+  | "join_failed";
+
+export type JoinResult =
+  | { ok: true; roomId: string; playerId: string }
+  | { ok: false; error: JoinError; roomId?: string };
