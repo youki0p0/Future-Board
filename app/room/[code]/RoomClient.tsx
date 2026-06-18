@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { getClientId, getSavedName } from "@/lib/clientId";
 import { joinRoom } from "@/lib/room";
 import { useRoomState } from "@/lib/useRoomState";
+import { useCpuDriver } from "@/lib/cpu";
 import Lobby from "@/components/Lobby";
 import SetupPhase from "@/components/SetupPhase";
 import GamePhase from "@/components/GamePhase";
@@ -13,6 +14,9 @@ import ResultScreen from "@/components/ResultScreen";
 export default function RoomClient({ code }: { code: string }) {
   const router = useRouter();
   const { data, me, loading, error, refresh } = useRoomState(code);
+
+  // Test-only: host browser auto-plays any CPU players. Remove before release.
+  useCpuDriver(data, me);
 
   // If we have a saved name but aren't in this room yet (e.g. opened via link),
   // auto-join while the room is still in the lobby.

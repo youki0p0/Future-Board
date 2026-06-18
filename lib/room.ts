@@ -202,6 +202,23 @@ export async function joinRoom(
   return { ok: true };
 }
 
+// Test-only: insert a CPU player (already "ready"). Remove with the CPU feature.
+export async function requireSupabaseInsertCpu(
+  roomId: string,
+  clientId: string,
+  name: string,
+): Promise<void> {
+  await sb().from("players").insert({
+    room_id: roomId,
+    client_id: clientId,
+    name,
+    position: 0,
+    is_ready: true,
+    skip_next_turn: false,
+    score: 0,
+  });
+}
+
 export async function renamePlayer(playerId: string, name: string): Promise<void> {
   await patchPlayer(playerId, { name });
 }
