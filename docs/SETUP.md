@@ -19,8 +19,17 @@ This is a Next.js 15 (App Router) + Supabase Realtime web party game, deployable
 1. Create a new Supabase project.
 2. Open **SQL Editor** and run the contents of [`supabase/schema.sql`](../supabase/schema.sql).
    - This creates the `rooms`, `players`, `squares`, `game_events`, `votes` tables,
-     indexes, an `updated_at` trigger, permissive **MVP** RLS policies, the required
-     grants, and registers the tables with the `supabase_realtime` publication.
+     indexes, `updated_at` + room `version` triggers, permissive **MVP** RLS policies,
+     the required grants, and registers the tables with the `supabase_realtime` publication.
+   - **Already have a database from an earlier version?** Just re-run the file — it
+     includes an idempotent migration block that adds the new `seed` / `version` /
+     `is_cpu` columns and renames the old `lobby` room status to `waiting`.
+
+> **Room-matching spec:** room codes are 4 uppercase chars
+> (`ABCDEFGHJKLMNPQRSTUVWXYZ23456789`, no ambiguous I/O/0/1), the joinable
+> pre-game status is `waiting`, the host is identified by `rooms.host_client_id`,
+> and players are matched/rejoined by the unique `(room_id, client_id)` pair —
+> aligned with the shared Project MAKINA room-matching system.
 3. In **Project Settings → API**, copy:
    - **Project URL** → `NEXT_PUBLIC_SUPABASE_URL`
    - **Publishable / anon key** → `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`

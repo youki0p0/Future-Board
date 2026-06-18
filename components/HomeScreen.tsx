@@ -5,7 +5,15 @@ import { useRouter } from "next/navigation";
 import { getClientId, getSavedName, saveName } from "@/lib/clientId";
 import { createRoom, joinRoom } from "@/lib/room";
 import { BOARD_OPTIONS } from "@/lib/board";
-import type { BoardLength } from "@/types/game";
+import type { BoardLength, JoinError } from "@/types/game";
+
+const JOIN_ERROR_MESSAGES: Record<JoinError, string> = {
+  not_configured: "サーバーに接続できません",
+  not_found: "ルームが見つかりません",
+  in_progress: "このゲームは既に開始しています",
+  full: "満員です (最大8人)",
+  join_failed: "参加に失敗しました",
+};
 
 type Mode = "menu" | "create" | "join";
 
@@ -45,7 +53,7 @@ export default function HomeScreen({ initialCode = "" }: { initialCode?: string 
       saveName(name.trim());
       const res = await joinRoom(getClientId(), code.trim().toUpperCase(), name.trim());
       if (!res.ok) {
-        setError(res.error ?? "参加に失敗しました");
+        setError(JOIN_ERROR_MESSAGES[res.error]);
         setBusy(false);
         return;
       }

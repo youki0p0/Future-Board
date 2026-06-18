@@ -30,7 +30,8 @@ const CPU_PREFIX = "cpu:";
 const ACTION_DELAY_MS = 700;
 
 export function isCpu(player: Player): boolean {
-  return player.client_id.startsWith(CPU_PREFIX);
+  // Primary signal is the is_cpu column (shared spec); prefix kept as a fallback.
+  return player.is_cpu || player.client_id.startsWith(CPU_PREFIX);
 }
 
 export function cpuCount(players: Player[]): number {

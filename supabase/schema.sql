@@ -31,8 +31,10 @@ $$;
 create table if not exists public.rooms (
   id                       uuid primary key default gen_random_uuid(),
   code                     text not null unique,
-  status                   text not null default 'lobby'
-                             check (status in ('lobby','setup','playing','finished')),
+  -- 'waiting' is the joinable pre-game state (shared room-matching spec);
+  -- 'setup' is the Future Board square-planting phase.
+  status                   text not null default 'waiting'
+                             check (status in ('waiting','setup','playing','finished')),
   host_client_id           text not null,
   board_length             integer not null default 40
                              check (board_length in (30,40,50)),
@@ -41,6 +43,8 @@ create table if not exists public.rooms (
   turn_index               integer not null default 0,
   last_spurt_enabled       boolean not null default false,
   winner_player_id         uuid,
+  seed                     text not null default gen_random_uuid()::text,
+  version                  integer not null default 0,
   state                    jsonb not null default '{}'::jsonb,
   created_at               timestamptz not null default now(),
   updated_at               timestamptz not null default now()
@@ -53,6 +57,23 @@ create trigger rooms_set_updated_at
   before update on public.rooms
   for each row execute function public.set_updated_at();
 
+-- Optimistic-concurrency version counter, auto-incremented on every update
+-- (shared room-matching spec).
+create or replace function public.bump_room_version()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.version = coalesce(old.version, 0) + 1;
+  return new;
+end;
+$$;
+
+drop trigger if exists rooms_bump_version on public.rooms;
+create trigger rooms_bump_version
+  before update on public.rooms
+  for each row execute function public.bump_room_version();
+
 -- ----------------------------------------------------------------------------
 -- players
 -- ----------------------------------------------------------------------------
@@ -64,6 +85,7 @@ create table if not exists public.players (
   position       integer not null default 0,
   is_ready       boolean not null default false,
   skip_next_turn boolean not null default false,
+  is_cpu         boolean not null default false,
   score          integer not null default 0,
   joined_at      timestamptz not null default now(),
   updated_at     timestamptz not null default now(),
@@ -131,6 +153,20 @@ create table if not exists public.votes (
 );
 
 create index if not exists votes_room_idx on public.votes (room_id);
+
+-- ============================================================================
+-- Idempotent migration for projects created BEFORE the room-matching alignment.
+-- Safe to run repeatedly; new projects already have these from the CREATE TABLEs.
+-- ============================================================================
+alter table public.rooms   add column if not exists seed    text    not null default gen_random_uuid()::text;
+alter table public.rooms   add column if not exists version integer not null default 0;
+alter table public.players add column if not exists is_cpu  boolean not null default false;
+
+-- Rename the old 'lobby' status to 'waiting' and refresh the check constraint.
+update public.rooms set status = 'waiting' where status = 'lobby';
+alter table public.rooms drop constraint if exists rooms_status_check;
+alter table public.rooms add constraint rooms_status_check
+  check (status in ('waiting','setup','playing','finished'));
 
 -- ============================================================================
 -- Row Level Security

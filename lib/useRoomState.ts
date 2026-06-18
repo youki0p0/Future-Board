@@ -71,8 +71,12 @@ export function useRoomState(code: string): UseRoomState {
       channel = subscribeRoom(fresh.room.id, () => void refresh());
     })();
 
+    // Polling fallback (shared spec): covers any realtime event that is missed.
+    const poll = setInterval(() => void refresh(), 2500);
+
     return () => {
       active = false;
+      clearInterval(poll);
       if (channel) channel.unsubscribe();
     };
   }, [code, refresh]);
