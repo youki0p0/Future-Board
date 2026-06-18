@@ -1,6 +1,6 @@
 # Setup — Future Board by Project MAKINA
 
-仕込め。踏め。笑え。 — みんなで未来のマスを仕込んで、みんなで踏みに行くパーティすごろく。
+仕込め。踏め。笑え。 — みんなで未来のマスを仕込んで、踏みに行くパーティすごろく。
 
 This is a Next.js 15 (App Router) + Supabase Realtime web party game, deployable on Vercel. No login required: each browser generates a stable `client_id` in `localStorage`.
 

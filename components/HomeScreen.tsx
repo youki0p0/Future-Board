@@ -65,7 +65,7 @@ export default function HomeScreen({ initialCode = "" }: { initialCode?: string 
         </h1>
         <p className="mt-3 text-makina-muted">仕込め。踏め。笑え。</p>
         <p className="mt-1 text-xs text-makina-muted">
-          みんなで未来のマスを仕込んで、みんなで踏みに行くパーティすごろく。
+          みんなで未来のマスを仕込んで、踏みに行くパーティすごろく。
         </p>
       </header>
 

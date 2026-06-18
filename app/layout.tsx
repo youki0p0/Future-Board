@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Future Board by Project MAKINA",
-  description: "仕込め。踏め。笑え。— みんなで未来のマスを仕込んで、みんなで踏みに行くパーティすごろく。",
+  description: "仕込め。踏め。笑え。— みんなで未来のマスを仕込んで、踏みに行くパーティすごろく。",
 };
 
 export const viewport: Viewport = {
