@@ -58,7 +58,7 @@ export default function RoomClient({ code }: { code: string }) {
     );
   }
 
-  const { room, players, squares, events } = data;
+  const { room, players, squares, events, landings } = data;
 
   if (!me && room.status !== "waiting") {
     return (
@@ -77,7 +77,16 @@ export default function RoomClient({ code }: { code: string }) {
     case "setup":
       return <SetupPhase room={room} players={players} squares={squares} me={me} />;
     case "playing":
-      return <GamePhase room={room} players={players} squares={squares} events={events} me={me} />;
+      return (
+        <GamePhase
+          room={room}
+          players={players}
+          squares={squares}
+          events={events}
+          landings={landings}
+          me={me}
+        />
+      );
     case "finished":
       return (
         <ResultScreen
@@ -85,6 +94,7 @@ export default function RoomClient({ code }: { code: string }) {
           players={players}
           squares={squares}
           events={events}
+          landings={landings}
           me={me}
         />
       );

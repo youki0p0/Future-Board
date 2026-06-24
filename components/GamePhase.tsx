@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { Player, Room, Square, GameEvent } from "@/types/game";
+import type { Player, Room, Square, GameEvent, Landing } from "@/types/game";
 import { currentPlayer, turnOrder } from "@/lib/gameRules";
 import { effectMeta } from "@/lib/effects";
 import { lastSpurtCandidates } from "@/lib/board";
@@ -17,18 +17,21 @@ import DiceRoller from "@/components/DiceRoller";
 import PlayerList from "@/components/PlayerList";
 import EventLog from "@/components/EventLog";
 import SquareEditor from "@/components/SquareEditor";
+import ClapButton from "@/components/ClapButton";
 
 export default function GamePhase({
   room,
   players,
   squares,
   events,
+  landings,
   me,
 }: {
   room: Room;
   players: Player[];
   squares: Square[];
   events: GameEvent[];
+  landings: Landing[];
   me: Player | null;
 }) {
   const isHost = me?.client_id === room.host_client_id;
@@ -48,6 +51,11 @@ export default function GamePhase({
     ? `${lastSquare.position}|${lastSquare.landedByName}|${lastSquare.title}`
     : null;
   const showLanding = !!lastSquare && landingSig !== dismissedLanding;
+
+  // Live clap count for the square currently in focus (from the landings table).
+  const currentLandingId = lastSquare?.landingId ?? null;
+  const currentClaps =
+    landings.find((l) => l.id === currentLandingId)?.claps ?? 0;
 
   // Reset the dismissal once the landing clears, so re-landing the same square
   // later still announces.
@@ -104,12 +112,25 @@ export default function GamePhase({
               </p>
             </div>
 
+            {currentLandingId && (
+              <div className="mt-5 flex flex-col items-center gap-1">
+                <p className="text-xs text-makina-muted">盛り上がったら拍手を送ろう！</p>
+                <ClapButton
+                  key={currentLandingId}
+                  roomId={room.id}
+                  landingId={currentLandingId}
+                  claps={currentClaps}
+                  size="lg"
+                />
+              </div>
+            )}
+
             <button
-              className="mk-btn-primary mt-6 w-full"
+              className="mk-btn-secondary mt-5 w-full"
               onClick={() => setDismissedLanding(landingSig)}
               autoFocus
             >
-              OK
+              とじる
             </button>
           </div>
         </div>
@@ -160,9 +181,25 @@ export default function GamePhase({
               {effectMeta(lastSquare.effectType).label}
             </span>
           </div>
-          <h3 className="mt-2 text-lg font-bold">{lastSquare.title}</h3>
-          {lastSquare.body && <p className="mt-1 text-sm text-makina-muted">{lastSquare.body}</p>}
-          <p className="mt-2 text-[11px] text-makina-muted">作成者: {lastSquare.creatorName}</p>
+          <div className="mt-2 flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h3 className="text-lg font-bold break-words">{lastSquare.title}</h3>
+              {lastSquare.body && (
+                <p className="mt-1 text-sm text-makina-muted break-words">{lastSquare.body}</p>
+              )}
+              <p className="mt-2 text-[11px] text-makina-muted">
+                止まった人: {lastSquare.landedByName} · 作成者: {lastSquare.creatorName}
+              </p>
+            </div>
+            {currentLandingId && (
+              <ClapButton
+                key={currentLandingId}
+                roomId={room.id}
+                landingId={currentLandingId}
+                claps={currentClaps}
+              />
+            )}
+          </div>
         </section>
       )}
 

@@ -1,4 +1,4 @@
-import type { GameEvent, Player, Square } from "@/types/game";
+import type { Landing, Player, Square } from "@/types/game";
 import { goalIndex, LAST_SPURT_RANGE } from "@/lib/board";
 
 /** Stable turn order: by join time, then id as tie-breaker. */
@@ -48,59 +48,60 @@ export function setupCountFor(playerId: string, squares: Square[]): number {
 export interface PlayerResult {
   player: Player;
   rank: number;
-  stepped: number; // squares this player stepped on
-  ownStepped: number; // times this player's squares were stepped by anyone
+  /** Total applause this player received across all their landings. */
+  claps: number;
+  /** This player's landings, most-clapped (most exciting) first. */
+  landings: Landing[];
 }
 
 export interface ResultSummary {
   ranking: PlayerResult[];
-  hottestSquare: { square: Square; steps: number } | null;
+  /** The single most-clapped landing of the whole game. */
+  hottestLanding: Landing | null;
 }
 
-/** Compute end-of-game stats from players, squares and the event log. */
-export function computeResults(
-  players: Player[],
-  squares: Square[],
-  events: GameEvent[],
-): ResultSummary {
-  const stepEvents = events.filter((e) => e.event_type === "step");
-
-  const steppedByPlayer = new Map<string, number>();
-  const stepsBySquare = new Map<string, number>();
-  for (const e of stepEvents) {
-    if (e.player_id) steppedByPlayer.set(e.player_id, (steppedByPlayer.get(e.player_id) ?? 0) + 1);
-    const sid = e.payload?.squareId as string | undefined;
-    if (sid) stepsBySquare.set(sid, (stepsBySquare.get(sid) ?? 0) + 1);
+/**
+ * Final standings are decided by applause: the player whose landings drew the
+ * most claps wins — not goal-arrival order. Ties share a rank.
+ */
+export function computeResults(players: Player[], landings: Landing[]): ResultSummary {
+  const byPlayer = new Map<string, Landing[]>();
+  for (const l of landings) {
+    if (!l.player_id) continue;
+    const arr = byPlayer.get(l.player_id) ?? [];
+    arr.push(l);
+    byPlayer.set(l.player_id, arr);
   }
 
-  const ownStepped = new Map<string, number>();
-  for (const [sid, count] of stepsBySquare) {
-    const sq = squares.find((s) => s.id === sid);
-    if (sq?.creator_player_id) {
-      ownStepped.set(sq.creator_player_id, (ownStepped.get(sq.creator_player_id) ?? 0) + count);
+  const ranked = players
+    .map((player) => {
+      const mine = (byPlayer.get(player.id) ?? [])
+        .slice()
+        .sort(
+          (a, b) =>
+            (b.claps ?? 0) - (a.claps ?? 0) || a.created_at.localeCompare(b.created_at),
+        );
+      const claps = mine.reduce((sum, l) => sum + (l.claps ?? 0), 0);
+      return { player, claps, landings: mine };
+    })
+    .sort((a, b) => b.claps - a.claps || a.player.name.localeCompare(b.player.name));
+
+  const ranking: PlayerResult[] = [];
+  let prevClaps: number | null = null;
+  let rank = 0;
+  ranked.forEach((r, i) => {
+    if (prevClaps === null || r.claps !== prevClaps) {
+      rank = i + 1;
+      prevClaps = r.claps;
     }
+    ranking.push({ player: r.player, rank, claps: r.claps, landings: r.landings });
+  });
+
+  let hottestLanding: Landing | null = null;
+  for (const l of landings) {
+    if (!hottestLanding || (l.claps ?? 0) > (hottestLanding.claps ?? 0)) hottestLanding = l;
   }
+  if (hottestLanding && (hottestLanding.claps ?? 0) <= 0) hottestLanding = null;
 
-  const ranking: PlayerResult[] = [...players]
-    .sort((a, b) => b.position - a.position)
-    .map((player, i) => ({
-      player,
-      rank: i + 1,
-      stepped: steppedByPlayer.get(player.id) ?? 0,
-      ownStepped: ownStepped.get(player.id) ?? 0,
-    }));
-
-  let hottestSquare: ResultSummary["hottestSquare"] = null;
-  let max = 0;
-  for (const [sid, steps] of stepsBySquare) {
-    if (steps > max) {
-      const sq = squares.find((s) => s.id === sid);
-      if (sq) {
-        hottestSquare = { square: sq, steps };
-        max = steps;
-      }
-    }
-  }
-
-  return { ranking, hottestSquare };
+  return { ranking, hottestLanding };
 }
