@@ -247,7 +247,7 @@ export default function GamePhase({
                   </span>
                   <button
                     className="text-[12px] text-makina-danger"
-                    onClick={() => deleteSquare(s.id)}
+                    onClick={() => deleteSquare(room.id, s.id)}
                   >
                     削除
                   </button>

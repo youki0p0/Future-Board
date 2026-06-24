@@ -33,3 +33,21 @@ export function saveName(name: string): void {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(NAME_KEY, name);
 }
+
+// When a player intentionally leaves a room we mark it here so the room page's
+// link-based auto-join does not immediately re-seat them on the next realtime
+// refresh (which can fire before the route change unmounts the page).
+const LEFT_ROOM_KEY = "fb_left_room";
+
+export function markRoomLeft(code: string): void {
+  if (typeof window === "undefined") return;
+  window.sessionStorage.setItem(LEFT_ROOM_KEY, code.toUpperCase());
+}
+
+/** True (and clears the flag) if this client just left the given room. */
+export function consumeRoomLeft(code: string): boolean {
+  if (typeof window === "undefined") return false;
+  const left = window.sessionStorage.getItem(LEFT_ROOM_KEY) === code.toUpperCase();
+  if (left) window.sessionStorage.removeItem(LEFT_ROOM_KEY);
+  return left;
+}
