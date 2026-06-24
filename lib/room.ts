@@ -1,3 +1,4 @@
+import type { RealtimeChannel } from "@supabase/supabase-js";
 import type {
   BoardLength,
   EffectType,
@@ -22,6 +23,28 @@ const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no ambiguous O/0/I/1
 const sb = () => requireSupabase();
 
 // ----------------------------------------------------------------------------
+// Broadcast-primary realtime (referencing Stellar Life's room model)
+// ----------------------------------------------------------------------------
+// postgres_changes can lag (it depends on the table being in the realtime
+// publication) and our polling fallback is on a multi-second timer. So, like
+// Stellar Life, the low-latency primary path is an explicit broadcast: after a
+// client mutates a room it pokes a "sync" event on that room's channel and
+// every peer refetches immediately. The channel is registered by subscribeRoom
+// below, so only clients that are actually watching the room can broadcast.
+
+const channels = new Map<string, RealtimeChannel>();
+
+/** Tell every peer watching this room to refetch now. No-op if we are not
+ * subscribed (e.g. the room's creator, before the room page mounts). */
+export function pokeRoom(roomId: string): void {
+  channels.get(roomId)?.send({
+    type: "broadcast",
+    event: "sync",
+    payload: { roomId },
+  });
+}
+
+// ----------------------------------------------------------------------------
 // Low-level helpers
 // ----------------------------------------------------------------------------
 
@@ -34,6 +57,7 @@ export function generateRoomCode(len = 4): string {
 
 async function patchRoom(roomId: string, fields: Partial<Room>): Promise<void> {
   await sb().from("rooms").update(fields).eq("id", roomId);
+  pokeRoom(roomId);
 }
 
 async function patchPlayer(playerId: string, fields: Partial<Player>): Promise<void> {
@@ -52,6 +76,7 @@ async function logEvent(
     event_type: type,
     payload,
   });
+  pokeRoom(roomId);
 }
 
 async function fetchRoom(roomId: string): Promise<Room> {
@@ -115,7 +140,7 @@ export async function loadRoomData(code: string): Promise<RoomData | null> {
  * postgres_changes on rooms/players/squares and INSERTs on the append-only
  * game_events log. A polling fallback in useRoomState covers missed events.
  */
-export function subscribeRoom(roomId: string, onChange: () => void) {
+export function subscribeRoom(roomId: string, onChange: () => void): () => void {
   const client = sb();
   const channel = client
     .channel(`room:${roomId}`, { config: { broadcast: { self: false } } })
@@ -125,7 +150,12 @@ export function subscribeRoom(roomId: string, onChange: () => void) {
     .on("postgres_changes", { event: "*", schema: "public", table: "squares", filter: `room_id=eq.${roomId}` }, onChange)
     .on("postgres_changes", { event: "INSERT", schema: "public", table: "game_events", filter: `room_id=eq.${roomId}` }, onChange)
     .subscribe();
-  return channel;
+  // Register so mutations from this client can broadcast a "sync" poke to peers.
+  channels.set(roomId, channel);
+  return () => {
+    channels.delete(roomId);
+    void client.removeChannel(channel);
+  };
 }
 
 // ----------------------------------------------------------------------------
@@ -193,6 +223,7 @@ export async function joinRoom(clientId: string, code: string, name: string): Pr
   if (mine) {
     // Reconnecting to a seat we already hold → refresh the display name.
     await patchPlayer(mine.id, { name: name || mine.name });
+    pokeRoom(room.id);
     return { ok: true, roomId: room.id, playerId: mine.id };
   }
 
@@ -235,14 +266,51 @@ export async function requireSupabaseInsertCpu(
     is_cpu: true,
     score: 0,
   });
+  pokeRoom(roomId);
 }
 
-export async function renamePlayer(playerId: string, name: string): Promise<void> {
+export async function renamePlayer(roomId: string, playerId: string, name: string): Promise<void> {
   await patchPlayer(playerId, { name });
+  pokeRoom(roomId);
 }
 
-export async function setReady(playerId: string, ready: boolean): Promise<void> {
+export async function setReady(roomId: string, playerId: string, ready: boolean): Promise<void> {
   await patchPlayer(playerId, { is_ready: ready });
+  pokeRoom(roomId);
+}
+
+/**
+ * Leave the lobby: remove this client's seat. Mirrors Stellar Life's LEAVE —
+ * only valid while the room is still joinable (waiting). If the leaver was the
+ * host, the host role migrates to the earliest-joined remaining human so the
+ * lobby never gets stuck without anyone able to start. When no humans remain
+ * the room (and its CPUs, via cascade) is deleted.
+ */
+export async function leaveRoom(roomId: string, clientId: string): Promise<void> {
+  const room = await fetchRoom(roomId);
+  // Leaving mid-game would desync the turn order — restrict to the lobby.
+  if (room.status !== "waiting") return;
+
+  const players = await fetchPlayers(roomId);
+  const me = players.find((p) => p.client_id === clientId);
+  if (!me) return;
+
+  await sb().from("players").delete().eq("id", me.id);
+
+  const remaining = players.filter((p) => p.id !== me.id);
+  const humans = remaining.filter((p) => !p.is_cpu);
+  if (humans.length === 0) {
+    // Nobody left to play; drop the room (cascade removes CPU seats).
+    await sb().from("rooms").delete().eq("id", roomId);
+    return;
+  }
+
+  if (room.host_client_id === clientId) {
+    const nextHost = turnOrder(humans)[0];
+    await patchRoom(roomId, { host_client_id: nextHost.client_id });
+  }
+
+  await logEvent(roomId, null, "leave", { name: me.name });
 }
 
 export async function setBoardLength(roomId: string, boardLength: BoardLength): Promise<void> {
@@ -327,11 +395,13 @@ export async function createSquare(input: NewSquareInput): Promise<{ ok: boolean
     // Unique (room_id, position) violation → someone took the square first.
     return { ok: false, error: "そのマスは埋まりました。別のマスを選んでください。" };
   }
+  pokeRoom(input.roomId);
   return { ok: true };
 }
 
-export async function deleteSquare(squareId: string): Promise<void> {
+export async function deleteSquare(roomId: string, squareId: string): Promise<void> {
   await sb().from("squares").delete().eq("id", squareId);
+  pokeRoom(roomId);
 }
 
 // ----------------------------------------------------------------------------

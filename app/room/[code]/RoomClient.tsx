@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { getClientId, getSavedName } from "@/lib/clientId";
+import { consumeRoomLeft, getClientId, getSavedName } from "@/lib/clientId";
 import { joinRoom } from "@/lib/room";
 import { useRoomState } from "@/lib/useRoomState";
 import { useCpuDriver } from "@/lib/cpu";
@@ -23,6 +23,11 @@ export default function RoomClient({ code }: { code: string }) {
   useEffect(() => {
     if (loading || !data || me) return;
     if (data.room.status !== "waiting") return;
+    // Just left this room → don't auto-rejoin; head home instead.
+    if (consumeRoomLeft(code)) {
+      router.replace("/");
+      return;
+    }
     const name = getSavedName();
     if (!name) {
       router.replace(`/?code=${code}`);

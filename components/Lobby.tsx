@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import type { Player, Room } from "@/types/game";
 import { BOARD_OPTIONS } from "@/lib/board";
-import { renamePlayer, setBoardLength, setReady, startSetup } from "@/lib/room";
-import { saveName } from "@/lib/clientId";
+import { leaveRoom, renamePlayer, setBoardLength, setReady, startSetup } from "@/lib/room";
+import { getClientId, markRoomLeft, saveName } from "@/lib/clientId";
 import { addCpuPlayer, CPU_TEST_MODE, cpuCount } from "@/lib/cpu";
 import PlayerList from "@/components/PlayerList";
 
@@ -17,9 +18,11 @@ export default function Lobby({
   players: Player[];
   me: Player | null;
 }) {
+  const router = useRouter();
   const isHost = me?.client_id === room.host_client_id;
   const [name, setName] = useState(me?.name ?? "");
   const [copied, setCopied] = useState(false);
+  const [leaving, setLeaving] = useState(false);
 
   useEffect(() => {
     if (me) setName(me.name);
@@ -30,7 +33,19 @@ export default function Lobby({
   async function commitName() {
     if (!me || !name.trim() || name.trim() === me.name) return;
     saveName(name.trim());
-    await renamePlayer(me.id, name.trim());
+    await renamePlayer(room.id, me.id, name.trim());
+  }
+
+  async function handleLeave() {
+    if (leaving) return;
+    setLeaving(true);
+    markRoomLeft(room.code); // suppress link-based auto-rejoin during the route change
+    try {
+      await leaveRoom(room.id, getClientId());
+    } catch {
+      /* even if the delete fails, leave the page so the user isn't stuck */
+    }
+    router.push("/");
   }
 
   async function copyLink() {
@@ -112,7 +127,7 @@ export default function Lobby({
         {me && (
           <button
             className={me.is_ready ? "mk-btn-secondary" : "mk-btn-primary"}
-            onClick={() => setReady(me.id, !me.is_ready)}
+            onClick={() => setReady(room.id, me.id, !me.is_ready)}
           >
             {me.is_ready ? "✓ 準備完了（解除する）" : "準備完了にする"}
           </button>
@@ -133,6 +148,19 @@ export default function Lobby({
         )}
         {players.length < 2 && (
           <p className="text-center text-xs text-makina-muted">2人以上で開始できます。</p>
+        )}
+
+        <button
+          className="mk-btn-secondary mt-1 text-sm text-makina-muted"
+          disabled={leaving}
+          onClick={handleLeave}
+        >
+          {leaving ? "退室中…" : "← ルームを退室"}
+        </button>
+        {isHost && players.filter((p) => !p.is_cpu).length >= 2 && (
+          <p className="text-center text-[11px] text-makina-muted">
+            退室するとホストは次のプレイヤーへ引き継がれます。
+          </p>
         )}
       </div>
     </main>

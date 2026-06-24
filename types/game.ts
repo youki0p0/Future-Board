@@ -88,6 +88,7 @@ export interface Square {
 
 export type GameEventType =
   | "join"
+  | "leave"
   | "start_setup"
   | "start_game"
   | "roll"

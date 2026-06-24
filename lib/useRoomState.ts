@@ -55,7 +55,7 @@ export function useRoomState(code: string): UseRoomState {
 
   useEffect(() => {
     clientId.current = getClientId();
-    let channel: ReturnType<typeof subscribeRoom> | null = null;
+    let unsubscribe: (() => void) | null = null;
     let active = true;
 
     (async () => {
@@ -68,7 +68,7 @@ export function useRoomState(code: string): UseRoomState {
       }
       setData(fresh);
       setLoading(false);
-      channel = subscribeRoom(fresh.room.id, () => void refresh());
+      unsubscribe = subscribeRoom(fresh.room.id, () => void refresh());
     })();
 
     // Polling fallback (shared spec): covers any realtime event that is missed.
@@ -77,7 +77,7 @@ export function useRoomState(code: string): UseRoomState {
     return () => {
       active = false;
       clearInterval(poll);
-      if (channel) channel.unsubscribe();
+      if (unsubscribe) unsubscribe();
     };
   }, [code, refresh]);
 

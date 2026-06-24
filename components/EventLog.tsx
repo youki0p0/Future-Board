@@ -20,6 +20,8 @@ function describe(e: GameEvent, players: Player[], squares: Square[]): string {
   switch (e.event_type) {
     case "join":
       return `${(p.name as string) ?? who} が参加しました`;
+    case "leave":
+      return `${(p.name as string) ?? who} が退室しました`;
     case "start_setup":
       return "仕込みフェーズが始まりました";
     case "start_game":
