@@ -154,6 +154,38 @@ create table if not exists public.votes (
 
 create index if not exists votes_room_idx on public.votes (room_id);
 
+-- ----------------------------------------------------------------------------
+-- landings (one row per "a player stopped on a square") + applause counter
+-- ----------------------------------------------------------------------------
+-- Final ranking is decided by total claps a player received across their
+-- landings (not by goal-arrival order). Each landing snapshots the square so
+-- the result screen can list events even if the square is later removed.
+create table if not exists public.landings (
+  id          uuid primary key default gen_random_uuid(),
+  room_id     uuid not null references public.rooms(id) on delete cascade,
+  player_id   uuid references public.players(id) on delete cascade,
+  square_id   uuid references public.squares(id) on delete set null,
+  position    integer not null,
+  title       text not null default '',
+  body        text not null default '',
+  effect_type text not null default 'no_effect',
+  claps       integer not null default 0,
+  created_at  timestamptz not null default now()
+);
+
+create index if not exists landings_room_idx on public.landings (room_id, created_at);
+
+-- Atomic clap increment so concurrent applause never loses counts. Callable by
+-- the anon (publishable) key. p_count lets the UI batch rapid taps into one call.
+create or replace function public.clap_landing(p_landing_id uuid, p_count integer default 1)
+returns void
+language sql
+as $$
+  update public.landings
+     set claps = claps + greatest(coalesce(p_count, 1), 0)
+   where id = p_landing_id;
+$$;
+
 -- ============================================================================
 -- Idempotent migration for projects created BEFORE the room-matching alignment.
 -- Safe to run repeatedly; new projects already have these from the CREATE TABLEs.
@@ -178,13 +210,14 @@ alter table public.players      enable row level security;
 alter table public.squares      enable row level security;
 alter table public.game_events  enable row level security;
 alter table public.votes        enable row level security;
+alter table public.landings     enable row level security;
 
 -- Permissive MVP policies: allow anon + authenticated full access.
 do $$
 declare
   t text;
 begin
-  foreach t in array array['rooms','players','squares','game_events','votes'] loop
+  foreach t in array array['rooms','players','squares','game_events','votes','landings'] loop
     execute format('drop policy if exists "mvp_all_select" on public.%I;', t);
     execute format('drop policy if exists "mvp_all_insert" on public.%I;', t);
     execute format('drop policy if exists "mvp_all_update" on public.%I;', t);
@@ -206,8 +239,9 @@ end $$;
 -- ----------------------------------------------------------------------------
 grant usage on schema public to anon, authenticated;
 grant select, insert, update, delete
-  on public.rooms, public.players, public.squares, public.game_events, public.votes
+  on public.rooms, public.players, public.squares, public.game_events, public.votes, public.landings
   to anon, authenticated;
+grant execute on function public.clap_landing(uuid, integer) to anon, authenticated;
 
 -- ----------------------------------------------------------------------------
 -- Realtime: add tables to the supabase_realtime publication
@@ -216,7 +250,7 @@ do $$
 declare
   t text;
 begin
-  foreach t in array array['rooms','players','squares','game_events','votes'] loop
+  foreach t in array array['rooms','players','squares','game_events','votes','landings'] loop
     -- ignore "already member of publication" errors
     begin
       execute format('alter publication supabase_realtime add table public.%I;', t);
@@ -232,3 +266,4 @@ alter table public.players     replica identity full;
 alter table public.squares     replica identity full;
 alter table public.game_events replica identity full;
 alter table public.votes       replica identity full;
+alter table public.landings    replica identity full;

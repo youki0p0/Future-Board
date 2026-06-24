@@ -4,6 +4,7 @@ import type {
   EffectType,
   GameEventType,
   JoinResult,
+  Landing,
   PendingState,
   Player,
   Room,
@@ -102,6 +103,15 @@ async function fetchSquares(roomId: string): Promise<Square[]> {
   return (data ?? []) as Square[];
 }
 
+async function fetchLandings(roomId: string): Promise<Landing[]> {
+  const { data } = await sb()
+    .from("landings")
+    .select("*")
+    .eq("room_id", roomId)
+    .order("created_at", { ascending: true });
+  return (data ?? []) as Landing[];
+}
+
 // ----------------------------------------------------------------------------
 // Loading + realtime
 // ----------------------------------------------------------------------------
@@ -115,9 +125,10 @@ export async function loadRoomData(code: string): Promise<RoomData | null> {
   if (!roomRow) return null;
   const room = roomRow as Room;
 
-  const [players, squares, eventsRes] = await Promise.all([
+  const [players, squares, landings, eventsRes] = await Promise.all([
     fetchPlayers(room.id),
     fetchSquares(room.id),
+    fetchLandings(room.id),
     sb()
       .from("game_events")
       .select("*")
@@ -130,6 +141,7 @@ export async function loadRoomData(code: string): Promise<RoomData | null> {
     room,
     players,
     squares,
+    landings,
     events: (eventsRes.data ?? []) as RoomData["events"],
   };
 }
@@ -148,6 +160,7 @@ export function subscribeRoom(roomId: string, onChange: () => void): () => void 
     .on("postgres_changes", { event: "*", schema: "public", table: "rooms", filter: `id=eq.${roomId}` }, onChange)
     .on("postgres_changes", { event: "*", schema: "public", table: "players", filter: `room_id=eq.${roomId}` }, onChange)
     .on("postgres_changes", { event: "*", schema: "public", table: "squares", filter: `room_id=eq.${roomId}` }, onChange)
+    .on("postgres_changes", { event: "*", schema: "public", table: "landings", filter: `room_id=eq.${roomId}` }, onChange)
     .on("postgres_changes", { event: "INSERT", schema: "public", table: "game_events", filter: `room_id=eq.${roomId}` }, onChange)
     .subscribe();
   // Register so mutations from this client can broadcast a "sync" poke to peers.
@@ -352,6 +365,7 @@ export async function resetGame(roomId: string): Promise<void> {
     ),
   );
   await sb().from("squares").delete().eq("room_id", roomId);
+  await sb().from("landings").delete().eq("room_id", roomId);
   await patchRoom(roomId, {
     status: "waiting",
     current_turn_player_id: null,
@@ -401,6 +415,18 @@ export async function createSquare(input: NewSquareInput): Promise<{ ok: boolean
 
 export async function deleteSquare(roomId: string, squareId: string): Promise<void> {
   await sb().from("squares").delete().eq("id", squareId);
+  pokeRoom(roomId);
+}
+
+/** Add applause to a landing. `count` lets the UI batch rapid taps into one
+ * atomic increment (via the clap_landing RPC). Pokes peers so claps sync live. */
+export async function clapLanding(
+  roomId: string,
+  landingId: string,
+  count = 1,
+): Promise<void> {
+  if (count <= 0) return;
+  await sb().rpc("clap_landing", { p_landing_id: landingId, p_count: count });
   pokeRoom(roomId);
 }
 
@@ -613,12 +639,33 @@ export async function takeTurn(room: Room, me: Player): Promise<{ dice: number }
 
   const players = await fetchPlayers(room.id);
   const creator = players.find((p) => p.id === landing.creator_player_id);
+
+  // Record the landing so claps can accumulate against it and the result screen
+  // can rank players by applause. Snapshot the square content.
+  const { data: landingRow } = await sb()
+    .from("landings")
+    .insert({
+      room_id: room.id,
+      player_id: me.id,
+      square_id: landing.id,
+      position: to,
+      title: landing.title,
+      body: landing.body,
+      effect_type: landing.effect_type,
+      claps: 0,
+    })
+    .select("id")
+    .single();
+  const landingId = (landingRow as { id: string } | null)?.id ?? null;
+
   const lastSquare = {
     position: to,
     title: landing.title,
     body: landing.body,
     effectType: landing.effect_type,
     creatorName: creator?.name ?? "不明",
+    landedByName: me.name,
+    landingId,
   };
 
   const pending = await applyEffect(room, me.id, to, landing);

@@ -31,6 +31,25 @@ export interface LastSquareView {
   body: string;
   effectType: EffectType;
   creatorName: string;
+  /** Name of the player who just landed on (stopped at) this square. */
+  landedByName: string;
+  /** Row id of the recorded landing, so the UI can attach claps to it. */
+  landingId?: string | null;
+}
+
+// One "a player stopped on a square" event. Claps accumulate here and decide
+// the final ranking (most-clapped wins, not goal-arrival order).
+export interface Landing {
+  id: string;
+  room_id: string;
+  player_id: string | null;
+  square_id: string | null;
+  position: number;
+  title: string;
+  body: string;
+  effect_type: EffectType;
+  claps: number;
+  created_at: string;
 }
 
 export interface RoomState {
@@ -124,6 +143,7 @@ export interface RoomData {
   players: Player[];
   squares: Square[];
   events: GameEvent[];
+  landings: Landing[];
 }
 
 // Structured join result (machine error codes), aligned with the shared

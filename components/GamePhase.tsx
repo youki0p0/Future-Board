@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import type { Player, Room, Square, GameEvent } from "@/types/game";
+import { useEffect, useState } from "react";
+import type { Player, Room, Square, GameEvent, Landing } from "@/types/game";
 import { currentPlayer, turnOrder } from "@/lib/gameRules";
 import { effectMeta } from "@/lib/effects";
 import { lastSpurtCandidates } from "@/lib/board";
@@ -17,18 +17,21 @@ import DiceRoller from "@/components/DiceRoller";
 import PlayerList from "@/components/PlayerList";
 import EventLog from "@/components/EventLog";
 import SquareEditor from "@/components/SquareEditor";
+import ClapButton from "@/components/ClapButton";
 
 export default function GamePhase({
   room,
   players,
   squares,
   events,
+  landings,
   me,
 }: {
   room: Room;
   players: Player[];
   squares: Square[];
   events: GameEvent[];
+  landings: Landing[];
   me: Player | null;
 }) {
   const isHost = me?.client_id === room.host_client_id;
@@ -39,6 +42,26 @@ export default function GamePhase({
 
   const [showModerate, setShowModerate] = useState(false);
   const [placePos, setPlacePos] = useState<number | null>(null);
+
+  // Full-screen "someone stopped here" announcement. It shows whenever a player
+  // lands on a planted square (lastSquare) and is dismissed locally per client.
+  // The signature changes on each new landing so the overlay re-appears.
+  const [dismissedLanding, setDismissedLanding] = useState<string | null>(null);
+  const landingSig = lastSquare
+    ? `${lastSquare.position}|${lastSquare.landedByName}|${lastSquare.title}`
+    : null;
+  const showLanding = !!lastSquare && landingSig !== dismissedLanding;
+
+  // Live clap count for the square currently in focus (from the landings table).
+  const currentLandingId = lastSquare?.landingId ?? null;
+  const currentClaps =
+    landings.find((l) => l.id === currentLandingId)?.claps ?? 0;
+
+  // Reset the dismissal once the landing clears, so re-landing the same square
+  // later still announces.
+  useEffect(() => {
+    if (!landingSig) setDismissedLanding(null);
+  }, [landingSig]);
 
   const pendingForMe = !!me && pending && "playerId" in pending && pending.playerId === me.id;
   const canRoll = myTurn && !pending;
@@ -55,6 +78,64 @@ export default function GamePhase({
 
   return (
     <main className="mx-auto max-w-lg px-4 py-6">
+      {/* Full-screen landing announcement */}
+      {showLanding && lastSquare && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-6 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="mk-panel animate-pop-in w-full max-w-md border-makina-accent/40 p-7 text-center shadow-2xl">
+            <p className="text-xs font-semibold uppercase tracking-[0.4em] text-makina-accent">
+              STOP!
+            </p>
+            <h2 className="mt-3 text-2xl font-bold leading-snug">
+              <span className="text-makina-accent">{lastSquare.landedByName}</span> さんが
+              <br />
+              止まりました！
+            </h2>
+
+            <div className="mt-5 rounded-2xl border border-makina-line bg-makina-bg/50 p-4">
+              <p className="text-xs text-makina-muted">内容は</p>
+              <p className="mt-1 text-xl font-bold break-words">「{lastSquare.title}」</p>
+              {lastSquare.body && (
+                <p className="mt-2 text-sm text-makina-muted break-words">{lastSquare.body}</p>
+              )}
+              <div className="mt-3 flex items-center justify-center gap-2">
+                <span className="mk-chip text-makina-muted">{lastSquare.position} マス目</span>
+                <span className="mk-chip text-makina-accent">
+                  {effectMeta(lastSquare.effectType).short}
+                </span>
+              </div>
+              <p className="mt-2 text-[11px] text-makina-muted">
+                仕込んだ人: {lastSquare.creatorName}
+              </p>
+            </div>
+
+            {currentLandingId && (
+              <div className="mt-5 flex flex-col items-center gap-1">
+                <p className="text-xs text-makina-muted">盛り上がったら拍手を送ろう！</p>
+                <ClapButton
+                  key={currentLandingId}
+                  roomId={room.id}
+                  landingId={currentLandingId}
+                  claps={currentClaps}
+                  size="lg"
+                />
+              </div>
+            )}
+
+            <button
+              className="mk-btn-secondary mt-5 w-full"
+              onClick={() => setDismissedLanding(landingSig)}
+              autoFocus
+            >
+              とじる
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <header className="mb-4 flex items-center justify-between">
         <div>
@@ -100,9 +181,25 @@ export default function GamePhase({
               {effectMeta(lastSquare.effectType).label}
             </span>
           </div>
-          <h3 className="mt-2 text-lg font-bold">{lastSquare.title}</h3>
-          {lastSquare.body && <p className="mt-1 text-sm text-makina-muted">{lastSquare.body}</p>}
-          <p className="mt-2 text-[11px] text-makina-muted">作成者: {lastSquare.creatorName}</p>
+          <div className="mt-2 flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h3 className="text-lg font-bold break-words">{lastSquare.title}</h3>
+              {lastSquare.body && (
+                <p className="mt-1 text-sm text-makina-muted break-words">{lastSquare.body}</p>
+              )}
+              <p className="mt-2 text-[11px] text-makina-muted">
+                止まった人: {lastSquare.landedByName} · 作成者: {lastSquare.creatorName}
+              </p>
+            </div>
+            {currentLandingId && (
+              <ClapButton
+                key={currentLandingId}
+                roomId={room.id}
+                landingId={currentLandingId}
+                claps={currentClaps}
+              />
+            )}
+          </div>
         </section>
       )}
 
