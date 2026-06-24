@@ -619,6 +619,7 @@ export async function takeTurn(room: Room, me: Player): Promise<{ dice: number }
     body: landing.body,
     effectType: landing.effect_type,
     creatorName: creator?.name ?? "不明",
+    landedByName: me.name,
   };
 
   const pending = await applyEffect(room, me.id, to, landing);

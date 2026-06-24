@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Player, Room, Square, GameEvent } from "@/types/game";
 import { currentPlayer, turnOrder } from "@/lib/gameRules";
 import { effectMeta } from "@/lib/effects";
@@ -40,6 +40,21 @@ export default function GamePhase({
   const [showModerate, setShowModerate] = useState(false);
   const [placePos, setPlacePos] = useState<number | null>(null);
 
+  // Full-screen "someone stopped here" announcement. It shows whenever a player
+  // lands on a planted square (lastSquare) and is dismissed locally per client.
+  // The signature changes on each new landing so the overlay re-appears.
+  const [dismissedLanding, setDismissedLanding] = useState<string | null>(null);
+  const landingSig = lastSquare
+    ? `${lastSquare.position}|${lastSquare.landedByName}|${lastSquare.title}`
+    : null;
+  const showLanding = !!lastSquare && landingSig !== dismissedLanding;
+
+  // Reset the dismissal once the landing clears, so re-landing the same square
+  // later still announces.
+  useEffect(() => {
+    if (!landingSig) setDismissedLanding(null);
+  }, [landingSig]);
+
   const pendingForMe = !!me && pending && "playerId" in pending && pending.playerId === me.id;
   const canRoll = myTurn && !pending;
 
@@ -55,6 +70,51 @@ export default function GamePhase({
 
   return (
     <main className="mx-auto max-w-lg px-4 py-6">
+      {/* Full-screen landing announcement */}
+      {showLanding && lastSquare && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-6 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="mk-panel animate-pop-in w-full max-w-md border-makina-accent/40 p-7 text-center shadow-2xl">
+            <p className="text-xs font-semibold uppercase tracking-[0.4em] text-makina-accent">
+              STOP!
+            </p>
+            <h2 className="mt-3 text-2xl font-bold leading-snug">
+              <span className="text-makina-accent">{lastSquare.landedByName}</span> さんが
+              <br />
+              止まりました！
+            </h2>
+
+            <div className="mt-5 rounded-2xl border border-makina-line bg-makina-bg/50 p-4">
+              <p className="text-xs text-makina-muted">内容は</p>
+              <p className="mt-1 text-xl font-bold break-words">「{lastSquare.title}」</p>
+              {lastSquare.body && (
+                <p className="mt-2 text-sm text-makina-muted break-words">{lastSquare.body}</p>
+              )}
+              <div className="mt-3 flex items-center justify-center gap-2">
+                <span className="mk-chip text-makina-muted">{lastSquare.position} マス目</span>
+                <span className="mk-chip text-makina-accent">
+                  {effectMeta(lastSquare.effectType).short}
+                </span>
+              </div>
+              <p className="mt-2 text-[11px] text-makina-muted">
+                仕込んだ人: {lastSquare.creatorName}
+              </p>
+            </div>
+
+            <button
+              className="mk-btn-primary mt-6 w-full"
+              onClick={() => setDismissedLanding(landingSig)}
+              autoFocus
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <header className="mb-4 flex items-center justify-between">
         <div>

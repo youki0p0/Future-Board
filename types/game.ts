@@ -31,6 +31,8 @@ export interface LastSquareView {
   body: string;
   effectType: EffectType;
   creatorName: string;
+  /** Name of the player who just landed on (stopped at) this square. */
+  landedByName: string;
 }
 
 export interface RoomState {
